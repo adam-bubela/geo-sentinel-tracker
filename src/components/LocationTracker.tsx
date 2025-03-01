@@ -1,6 +1,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { toast } from "@/components/ui/sonner";
+//import { toast } from "@/components/ui/sonner";
+import { toast } from "sonner"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
