@@ -1,14 +1,13 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
-//import { toast } from "@/components/ui/sonner";
-import { toast } from "sonner"
+import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { ChevronDown, ChevronUp, MapPin, Wifi, WifiOff, AlertCircle, CheckCircle2 } from "lucide-react";
+import { MapPin, Wifi, WifiOff, AlertCircle, CheckCircle2, Camera, Image as ImageIcon, ChevronDown, ChevronUp } from "lucide-react";
 
 // Define types
 interface Coordinates {
@@ -27,6 +26,8 @@ interface LocationState {
   isOnline: boolean;
   pendingUpdates: number;
   showDetails: boolean;
+  capturedImage: string | null;
+  isCameraActive: boolean;
 }
 
 // API endpoint configuration - should be updated with your actual API endpoint
@@ -43,15 +44,22 @@ const LocationTracker = () => {
     isOnline: navigator.onLine,
     pendingUpdates: 0,
     showDetails: false,
+    capturedImage: null,
+    isCameraActive: false,
   });
 
   const locationWatchId = useRef<number | null>(null);
   const sendIntervalId = useRef<number | null>(null);
   const countdownIntervalId = useRef<number | null>(null);
   const pendingLocations = useRef<Coordinates[]>([]);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   
   // Check if geolocation is supported
   const isGeolocationSupported = 'geolocation' in navigator;
+  // Check if camera is supported
+  const isCameraSupported = 'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices;
 
   // Handle online/offline status
   useEffect(() => {
@@ -214,6 +222,80 @@ const LocationTracker = () => {
     }
   };
 
+  // Camera functions
+  const startCamera = async () => {
+    if (!isCameraSupported) {
+      toast.error("Camera not supported", {
+        description: "Your browser doesn't support camera access.",
+      });
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: "environment" },
+        audio: false
+      });
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
+        setState(prev => ({ ...prev, isCameraActive: true, error: null }));
+      }
+    } catch (error) {
+      console.error("Camera error:", error);
+      setState(prev => ({ 
+        ...prev, 
+        error: "Failed to access camera. Please check permissions.",
+        isCameraActive: false
+      }));
+      
+      toast.error("Camera error", {
+        description: "Failed to access camera. Please check permissions.",
+      });
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    
+    setState(prev => ({ ...prev, isCameraActive: false }));
+  };
+
+  const captureImage = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    
+    if (ctx) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = canvas.toDataURL('image/jpeg', 0.8);
+      setState(prev => ({ ...prev, capturedImage: imageData }));
+      stopCamera();
+      
+      toast.success("Image captured", {
+        description: "Image will be sent with the next location update.",
+      });
+    }
+  };
+
+  const discardImage = () => {
+    setState(prev => ({ ...prev, capturedImage: null }));
+    toast.info("Image discarded");
+  };
+
   // Send location to API
   const sendLocation = async (location: Coordinates) => {
     if (!state.isOnline) {
@@ -228,28 +310,28 @@ const LocationTracker = () => {
 
     try {
       // Would be a real API call in production
-      // const response = await fetch(API_ENDPOINT, {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json'
-      //   },
-      //   body: JSON.stringify(location)
-      // });
+      // Create data object including location and image if available
+      const data = {
+        location,
+        image: state.capturedImage || null,
+        timestamp: new Date().toISOString()
+      };
 
       // Simulate API call for development
-      console.log("Sending location to API:", location);
+      console.log("Sending data to API:", data);
       
-      // Reset countdown
+      // Reset countdown and clear captured image after sending
       setState(prev => ({
         ...prev,
         lastSentLocation: location,
-        nextUpdateIn: UPDATE_INTERVAL
+        nextUpdateIn: UPDATE_INTERVAL,
+        capturedImage: null // Clear image after sending
       }));
       
       // Simple success message for frequent updates
       if (!state.lastSentLocation) {
         toast.success("Location sent", {
-          description: `Location sent successfully.`,
+          description: `Location${state.capturedImage ? ' and image' : ''} sent successfully.`,
         });
       }
     } catch (error) {
@@ -279,16 +361,21 @@ const LocationTracker = () => {
     
     try {
       // Would be a batch API call in production
-      // const response = await fetch(`${API_ENDPOINT}/batch`, {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json'
-      //   },
-      //   body: JSON.stringify(locations)
-      // });
+      // For each location, create a data object including the image if available
+      const data = locations.map(location => ({
+        location,
+        image: state.capturedImage || null,
+        timestamp: new Date().toISOString()
+      }));
 
       // Simulate API call for development
-      console.log("Sending pending locations to API:", locations);
+      console.log("Sending pending data to API:", data);
+      
+      // Clear captured image after sending
+      setState(prev => ({
+        ...prev,
+        capturedImage: null
+      }));
       
       toast.success("Pending locations sent", {
         description: `${locations.length} location updates sent successfully.`,
@@ -307,7 +394,7 @@ const LocationTracker = () => {
         description: "Will retry again later.",
       });
     }
-  }, [state.isOnline]);
+  }, [state.isOnline, state.capturedImage]);
 
   // Clean up on unmount
   useEffect(() => {
@@ -322,6 +409,10 @@ const LocationTracker = () => {
       
       if (countdownIntervalId.current) {
         clearInterval(countdownIntervalId.current);
+      }
+      
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
@@ -402,6 +493,93 @@ const LocationTracker = () => {
               disabled={!isGeolocationSupported}
               className="data-[state=checked]:bg-green-500"
             />
+          </div>
+          
+          {/* Camera and Image Section */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-medium">Camera</h3>
+                <p className="text-sm text-muted-foreground">
+                  {state.capturedImage 
+                    ? "Image ready to send with location" 
+                    : state.isCameraActive
+                      ? "Camera is active"
+                      : "Capture image to send with location"}
+                </p>
+              </div>
+              
+              <div className="flex space-x-2">
+                {!state.isCameraActive && !state.capturedImage && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={startCamera}
+                    disabled={!isCameraSupported}
+                  >
+                    <Camera className="h-4 w-4 mr-1" />
+                    Open Camera
+                  </Button>
+                )}
+                
+                {state.isCameraActive && (
+                  <>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={stopCamera}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      onClick={captureImage}
+                    >
+                      Capture
+                    </Button>
+                  </>
+                )}
+                
+                {state.capturedImage && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={discardImage}
+                  >
+                    Discard
+                  </Button>
+                )}
+              </div>
+            </div>
+            
+            {state.isCameraActive && (
+              <div className="rounded-lg overflow-hidden bg-black relative">
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  playsInline 
+                  className="w-full h-auto"
+                />
+              </div>
+            )}
+            
+            {state.capturedImage && (
+              <div className="rounded-lg overflow-hidden relative bg-secondary p-2">
+                <div className="flex items-center space-x-2 mb-2">
+                  <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Captured Image</span>
+                </div>
+                <img 
+                  src={state.capturedImage} 
+                  alt="Captured" 
+                  className="w-full h-auto rounded"
+                />
+              </div>
+            )}
+            
+            {/* Hidden canvas for image capturing */}
+            <canvas ref={canvasRef} className="hidden" />
           </div>
           
           {state.isTracking && (
@@ -515,3 +693,4 @@ const LocationTracker = () => {
 };
 
 export default LocationTracker;
+
