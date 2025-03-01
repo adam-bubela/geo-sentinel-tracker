@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { MapPin, Wifi, WifiOff, AlertCircle, CheckCircle2, Camera, Image as ImageIcon, ChevronDown, ChevronUp } from "lucide-react";
 
-// Define types
 interface Coordinates {
   latitude: number;
   longitude: number;
@@ -30,7 +28,6 @@ interface LocationState {
   isCameraActive: boolean;
 }
 
-// API endpoint configuration - should be updated with your actual API endpoint
 const API_ENDPOINT = "https://your-api-endpoint.com/locations";
 const UPDATE_INTERVAL = 60; // seconds
 
@@ -56,12 +53,9 @@ const LocationTracker = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   
-  // Check if geolocation is supported
   const isGeolocationSupported = 'geolocation' in navigator;
-  // Check if camera is supported
   const isCameraSupported = 'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices;
 
-  // Handle online/offline status
   useEffect(() => {
     const handleOnlineStatus = () => {
       setState(prev => ({ ...prev, isOnline: navigator.onLine }));
@@ -84,7 +78,6 @@ const LocationTracker = () => {
     };
   }, []);
 
-  // Start tracking function
   const startTracking = () => {
     if (!isGeolocationSupported) {
       setState(prev => ({ 
@@ -99,7 +92,6 @@ const LocationTracker = () => {
     }
 
     try {
-      // Start watching position
       locationWatchId.current = navigator.geolocation.watchPosition(
         (position) => {
           const newLocation: Coordinates = {
@@ -149,14 +141,12 @@ const LocationTracker = () => {
         }
       );
 
-      // Set interval for sending location
       sendIntervalId.current = window.setInterval(() => {
         if (state.currentLocation) {
           sendLocation(state.currentLocation);
         }
       }, UPDATE_INTERVAL * 1000);
 
-      // Set countdown timer interval
       countdownIntervalId.current = window.setInterval(() => {
         setState(prev => ({
           ...prev,
@@ -186,7 +176,6 @@ const LocationTracker = () => {
     }
   };
 
-  // Stop tracking function
   const stopTracking = () => {
     if (locationWatchId.current) {
       navigator.geolocation.clearWatch(locationWatchId.current);
@@ -213,7 +202,6 @@ const LocationTracker = () => {
     });
   };
 
-  // Toggle tracking state
   const toggleTracking = () => {
     if (state.isTracking) {
       stopTracking();
@@ -222,7 +210,6 @@ const LocationTracker = () => {
     }
   };
 
-  // Camera functions
   const startCamera = async () => {
     if (!isCameraSupported) {
       toast.error("Camera not supported", {
@@ -296,10 +283,8 @@ const LocationTracker = () => {
     toast.info("Image discarded");
   };
 
-  // Send location to API
   const sendLocation = async (location: Coordinates) => {
     if (!state.isOnline) {
-      // If offline, store location to send later
       pendingLocations.current.push(location);
       setState(prev => ({ 
         ...prev, 
@@ -309,26 +294,31 @@ const LocationTracker = () => {
     }
 
     try {
-      // Would be a real API call in production
-      // Create data object including location and image if available
       const data = {
         location,
         image: state.capturedImage || null,
         timestamp: new Date().toISOString()
       };
 
-      // Simulate API call for development
-      console.log("Sending data to API:", data);
-      
-      // Reset countdown and clear captured image after sending
+      const response = await fetch(API_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API responded with status: ${response.status}`);
+      }
+
       setState(prev => ({
         ...prev,
         lastSentLocation: location,
         nextUpdateIn: UPDATE_INTERVAL,
-        capturedImage: null // Clear image after sending
+        capturedImage: null
       }));
       
-      // Simple success message for frequent updates
       if (!state.lastSentLocation) {
         toast.success("Location sent", {
           description: `Location${state.capturedImage ? ' and image' : ''} sent successfully.`,
@@ -337,7 +327,6 @@ const LocationTracker = () => {
     } catch (error) {
       console.error("Failed to send location:", error);
       
-      // If we fail to send, add to pending
       pendingLocations.current.push(location);
       setState(prev => ({ 
         ...prev, 
@@ -350,7 +339,6 @@ const LocationTracker = () => {
     }
   };
 
-  // Send all pending locations
   const sendPendingLocations = useCallback(async () => {
     if (!state.isOnline || pendingLocations.current.length === 0) return;
     
@@ -360,18 +348,26 @@ const LocationTracker = () => {
     setState(prev => ({ ...prev, pendingUpdates: 0 }));
     
     try {
-      // Would be a batch API call in production
-      // For each location, create a data object including the image if available
-      const data = locations.map(location => ({
-        location,
-        image: state.capturedImage || null,
-        timestamp: new Date().toISOString()
-      }));
+      for (const location of locations) {
+        const data = {
+          location,
+          image: state.capturedImage || null,
+          timestamp: new Date().toISOString()
+        };
 
-      // Simulate API call for development
-      console.log("Sending pending data to API:", data);
+        const response = await fetch(API_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+          throw new Error(`API responded with status: ${response.status}`);
+        }
+      }
       
-      // Clear captured image after sending
       setState(prev => ({
         ...prev,
         capturedImage: null
@@ -383,7 +379,6 @@ const LocationTracker = () => {
     } catch (error) {
       console.error("Failed to send pending locations:", error);
       
-      // Put locations back in the queue
       pendingLocations.current = [...pendingLocations.current, ...locations];
       setState(prev => ({ 
         ...prev, 
@@ -396,7 +391,6 @@ const LocationTracker = () => {
     }
   }, [state.isOnline, state.capturedImage]);
 
-  // Clean up on unmount
   useEffect(() => {
     return () => {
       if (locationWatchId.current) {
@@ -421,7 +415,6 @@ const LocationTracker = () => {
     setState(prev => ({ ...prev, showDetails: !prev.showDetails }));
   };
 
-  // Format coordinates for display
   const formatCoord = (value: number) => {
     return value ? value.toFixed(6) : "N/A";
   };
@@ -495,7 +488,6 @@ const LocationTracker = () => {
             />
           </div>
           
-          {/* Camera and Image Section */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -578,7 +570,6 @@ const LocationTracker = () => {
               </div>
             )}
             
-            {/* Hidden canvas for image capturing */}
             <canvas ref={canvasRef} className="hidden" />
           </div>
           
@@ -650,7 +641,6 @@ const LocationTracker = () => {
             </>
           )}
           
-          {/* Pending updates section for offline scenarios */}
           {state.pendingUpdates > 0 && (
             <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4 slide-up">
               <div className="flex items-center">
@@ -693,4 +683,3 @@ const LocationTracker = () => {
 };
 
 export default LocationTracker;
-
