@@ -1,3 +1,4 @@
+
 import React from "react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,8 @@ const LocationTracker = () => {
       <CardHeader>
         <TrackingHeader 
           isTracking={state.isTracking} 
-          isOnline={state.isOnline} 
+          isOnline={state.isOnline}
+          backgroundTracking={state.backgroundTracking}
         />
         
         <CardTitle>
@@ -46,6 +48,9 @@ const LocationTracker = () => {
             isGeolocationSupported={capabilities.isGeolocationSupported}
             lastSentLocation={state.lastSentLocation}
             toggleTracking={actions.toggleTracking}
+            backgroundTracking={state.backgroundTracking}
+            toggleBackgroundTracking={actions.toggleBackgroundTracking}
+            isBackgroundSyncSupported={capabilities.isBackgroundSyncSupported}
           />
           
           <CameraCapture 

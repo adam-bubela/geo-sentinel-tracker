@@ -1,10 +1,42 @@
 
 import React from "react";
+import { Clock, MapPin, Wifi, WifiOff, Check, X, Smartphone } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { Wifi, WifiOff, MapPin, CheckCircle2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { Coordinates } from "@/types/location-tracker";
+
+interface TrackingHeaderProps {
+  isTracking: boolean;
+  isOnline: boolean;
+  backgroundTracking?: boolean;
+}
+
+export const TrackingHeader: React.FC<TrackingHeaderProps> = ({
+  isTracking,
+  isOnline,
+  backgroundTracking
+}) => {
+  return (
+    <div className="flex items-center space-x-2 mb-2">
+      <Badge variant={isTracking ? "default" : "outline"} className="text-xs font-normal py-0">
+        {isTracking ? "Active" : "Inactive"}
+      </Badge>
+      
+      <Badge variant={isOnline ? "default" : "destructive"} className="text-xs font-normal py-0">
+        {isOnline ? <Wifi className="h-3 w-3 mr-1" /> : <WifiOff className="h-3 w-3 mr-1" />}
+        {isOnline ? "Online" : "Offline"}
+      </Badge>
+      
+      {backgroundTracking && (
+        <Badge variant="secondary" className="text-xs font-normal py-0">
+          <Smartphone className="h-3 w-3 mr-1" />
+          Background
+        </Badge>
+      )}
+    </div>
+  );
+};
 
 interface TrackingControlsProps {
   isTracking: boolean;
@@ -12,6 +44,9 @@ interface TrackingControlsProps {
   isGeolocationSupported: boolean;
   lastSentLocation: Coordinates | null;
   toggleTracking: () => void;
+  backgroundTracking?: boolean;
+  toggleBackgroundTracking?: () => void;
+  isBackgroundSyncSupported?: boolean;
 }
 
 export const TrackingControls: React.FC<TrackingControlsProps> = ({
@@ -19,77 +54,76 @@ export const TrackingControls: React.FC<TrackingControlsProps> = ({
   isOnline,
   isGeolocationSupported,
   lastSentLocation,
-  toggleTracking
+  toggleTracking,
+  backgroundTracking = false,
+  toggleBackgroundTracking,
+  isBackgroundSyncSupported = false
 }) => {
   return (
-    <>
-      <div className="flex items-center justify-between py-4">
-        <div className="flex items-center">
-          <div className="mr-3">
+    <div className="space-y-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="flex items-center gap-3">
+          <Button 
+            variant={isTracking ? "destructive" : "default"}
+            size="sm"
+            onClick={toggleTracking}
+            disabled={!isGeolocationSupported}
+            className="h-9 transition-all duration-300"
+          >
             {isTracking ? (
-              <div className="bg-green-500 status-indicator"></div>
+              <>
+                <X className="mr-1 h-4 w-4" /> Stop
+              </>
             ) : (
-              <div className="bg-gray-300 status-indicator"></div>
+              <>
+                <Check className="mr-1 h-4 w-4" /> Start
+              </>
             )}
-          </div>
-          <div>
-            <h3 className="font-medium">Location Tracking</h3>
-            <p className="text-sm text-muted-foreground">
-              {isTracking 
-                ? "Actively monitoring your position" 
-                : "Toggle to start tracking your location"}
+          </Button>
+          <div className="text-sm">
+            <p className="font-medium">Tracking {isTracking ? "active" : "inactive"}</p>
+            <p className="text-xs text-muted-foreground">
+              {isTracking ? "Sending periodic updates" : "Press Start to begin"}
             </p>
           </div>
         </div>
         
-        <Switch
-          checked={isTracking}
-          onCheckedChange={toggleTracking}
-          disabled={!isGeolocationSupported}
-          className="data-[state=checked]:bg-green-500"
-        />
-      </div>
-      
-      <div className="w-full text-center text-sm text-muted-foreground">
-        {lastSentLocation && (
-          <p className="flex items-center justify-center">
-            <CheckCircle2 className="h-4 w-4 mr-1 text-green-500" />
-            Last update: {new Date(lastSentLocation.timestamp).toLocaleTimeString()}
-          </p>
+        {isBackgroundSyncSupported && (
+          <div className="flex items-center space-x-2">
+            <Switch
+              id="background-mode"
+              checked={backgroundTracking}
+              onCheckedChange={toggleBackgroundTracking}
+              disabled={!isBackgroundSyncSupported}
+            />
+            <label 
+              htmlFor="background-mode" 
+              className="text-sm cursor-pointer select-none"
+            >
+              Background mode
+            </label>
+          </div>
         )}
       </div>
-    </>
+      
+      {lastSentLocation && (
+        <div className="bg-muted/50 rounded-lg p-3 text-xs">
+          <div className="flex items-center mb-1">
+            <Clock className="h-3 w-3 mr-1 text-muted-foreground" />
+            <span className="text-muted-foreground">Last update sent:</span>
+          </div>
+          <div className="flex items-start">
+            <MapPin className="h-3 w-3 mr-1 mt-0.5 text-muted-foreground" />
+            <div>
+              <div>Lat: {lastSentLocation.latitude.toFixed(6)}</div>
+              <div>Lng: {lastSentLocation.longitude.toFixed(6)}</div>
+              <div className="text-muted-foreground">
+                {new Date(lastSentLocation.timestamp).toLocaleTimeString()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
-
-export const TrackingHeader: React.FC<{
-  isTracking: boolean;
-  isOnline: boolean;
-}> = ({ isTracking, isOnline }) => (
-  <>
-    <div className="flex items-center justify-between mb-2">
-      <Badge 
-        variant={isTracking ? "default" : "outline"}
-        className="transition-all duration-300"
-      >
-        {isTracking ? "Tracking Active" : "Tracking Inactive"}
-      </Badge>
-      
-      <Badge 
-        variant={isOnline ? "default" : "destructive"}
-        className="ml-2"
-      >
-        {isOnline ? 
-          <Wifi className="h-3 w-3 mr-1" /> : 
-          <WifiOff className="h-3 w-3 mr-1" />
-        }
-        {isOnline ? "Online" : "Offline"}
-      </Badge>
-    </div>
-    
-    <div className="text-xl flex items-center">
-      <MapPin className="h-5 w-5 mr-2" />
-      Geo Sentinel Tracker
-    </div>
-  </>
-);

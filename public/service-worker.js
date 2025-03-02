@@ -10,6 +10,121 @@ const urlsToCache = [
   '/icons/icon-512x512.png'
 ];
 
+// Database for storing location data
+let locationDB;
+
+// Initialize IndexedDB
+function initDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('LocationDatabase', 1);
+    
+    request.onerror = (event) => {
+      console.error('IndexedDB error:', event.target.error);
+      reject(event.target.error);
+    };
+    
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('locations')) {
+        db.createObjectStore('locations', { keyPath: 'timestamp' });
+      }
+    };
+    
+    request.onsuccess = (event) => {
+      locationDB = event.target.result;
+      resolve(locationDB);
+    };
+  });
+}
+
+// Store location data in IndexedDB
+function storeLocation(locationData) {
+  return new Promise((resolve, reject) => {
+    if (!locationDB) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+    
+    const transaction = locationDB.transaction(['locations'], 'readwrite');
+    const store = transaction.objectStore('locations');
+    const request = store.add(locationData);
+    
+    request.onsuccess = () => resolve();
+    request.onerror = (event) => reject(event.target.error);
+  });
+}
+
+// Get all stored locations
+function getStoredLocations() {
+  return new Promise((resolve, reject) => {
+    if (!locationDB) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+    
+    const transaction = locationDB.transaction(['locations'], 'readonly');
+    const store = transaction.objectStore('locations');
+    const request = store.getAll();
+    
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = (event) => reject(event.target.error);
+  });
+}
+
+// Delete location from store after successful send
+function deleteLocation(timestamp) {
+  return new Promise((resolve, reject) => {
+    if (!locationDB) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+    
+    const transaction = locationDB.transaction(['locations'], 'readwrite');
+    const store = transaction.objectStore('locations');
+    const request = store.delete(timestamp);
+    
+    request.onsuccess = () => resolve();
+    request.onerror = (event) => reject(event.target.error);
+  });
+}
+
+// Track location in the background
+async function trackLocation() {
+  try {
+    await initDB();
+    
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        maximumAge: 60000,
+        timeout: 10000
+      });
+    });
+    
+    const locationData = {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      timestamp: new Date().toISOString()
+    };
+    
+    await storeLocation(locationData);
+    
+    // Try to send the location data immediately if online
+    if (navigator.onLine) {
+      await syncLocations();
+    } else {
+      // Register for background sync
+      self.registration.sync.register('sync-locations');
+    }
+    
+    return locationData;
+  } catch (error) {
+    console.error('Background location tracking error:', error);
+    throw error;
+  }
+}
+
 // Install event - cache the app shell
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -82,6 +197,29 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+// Handle messages from the client
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'START_TRACKING') {
+    // Start location tracking in the background
+    trackLocation()
+      .then(location => {
+        // Notify the client about the new location
+        if (event.source) {
+          event.source.postMessage({
+            type: 'LOCATION_UPDATED',
+            location: location
+          });
+        }
+      })
+      .catch(error => {
+        console.error('Error tracking location:', error);
+      });
+  } else if (event.data && event.data.type === 'STOP_TRACKING') {
+    // Stop any ongoing tracking
+    console.log('Background tracking stopped');
+  }
+});
+
 // Handle background sync for offline data
 self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-locations') {
@@ -91,7 +229,61 @@ self.addEventListener('sync', (event) => {
 
 // Function to sync pending locations
 const syncLocations = async () => {
-  // This would be implemented to pull from IndexedDB
-  // and send to the server when online
-  console.log('Background sync triggered');
+  try {
+    await initDB();
+    const locations = await getStoredLocations();
+    console.log(`Background sync: Found ${locations.length} locations to sync`);
+    
+    if (locations.length === 0) return;
+    
+    const API_ENDPOINT = self.API_ENDPOINT || "https://your-api-endpoint.com/locations";
+    
+    for (const location of locations) {
+      try {
+        const response = await fetch(API_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            location: {
+              latitude: location.latitude,
+              longitude: location.longitude,
+              accuracy: location.accuracy,
+              timestamp: location.timestamp
+            },
+            timestamp: new Date().toISOString()
+          }),
+        });
+        
+        if (response.ok) {
+          // Delete from store after successful send
+          await deleteLocation(location.timestamp);
+          console.log(`Location synced successfully: ${location.timestamp}`);
+        } else {
+          console.error(`Failed to sync location: ${response.status}`);
+        }
+      } catch (error) {
+        console.error('Error syncing location:', error);
+      }
+    }
+    
+    // Notify all clients about the sync
+    const clients = await self.clients.matchAll();
+    clients.forEach(client => {
+      client.postMessage({
+        type: 'SYNC_COMPLETED',
+        count: locations.length
+      });
+    });
+  } catch (error) {
+    console.error('Background sync error:', error);
+  }
 };
+
+// Setup periodic background sync if supported
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'geo-update') {
+    event.waitUntil(trackLocation());
+  }
+});

@@ -17,8 +17,8 @@ export interface LocationState {
   showDetails: boolean;
   capturedImage: string | null;
   isCameraActive: boolean;
+  backgroundTracking: boolean;
 }
 
 export const API_ENDPOINT = "https://your-api-endpoint.com/locations";
 export const UPDATE_INTERVAL = 60; // seconds
-

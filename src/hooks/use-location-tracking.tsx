@@ -15,6 +15,7 @@ export function useLocationTracking() {
     showDetails: false,
     capturedImage: null,
     isCameraActive: false,
+    backgroundTracking: false,
   });
 
   const locationWatchId = useRef<number | null>(null);
@@ -24,9 +25,62 @@ export function useLocationTracking() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const swRegistration = useRef<ServiceWorkerRegistration | null>(null);
   
   const isGeolocationSupported = 'geolocation' in navigator;
   const isCameraSupported = 'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices;
+  const isServiceWorkerSupported = 'serviceWorker' in navigator;
+  const isBackgroundSyncSupported = isServiceWorkerSupported && 'SyncManager' in window;
+  const isPeriodicSyncSupported = isServiceWorkerSupported && 'PeriodicSyncManager' in window;
+
+  // Register service worker
+  useEffect(() => {
+    if (isServiceWorkerSupported) {
+      navigator.serviceWorker.register('/service-worker.js')
+        .then(registration => {
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+          swRegistration.current = registration;
+          
+          // Set API endpoint in the service worker
+          if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+              type: 'SET_API_ENDPOINT',
+              endpoint: API_ENDPOINT
+            });
+          }
+        })
+        .catch(error => {
+          console.error('ServiceWorker registration failed: ', error);
+        });
+    }
+  }, []);
+
+  // Listen for messages from service worker
+  useEffect(() => {
+    if (isServiceWorkerSupported) {
+      const handleServiceWorkerMessage = (event: MessageEvent) => {
+        const data = event.data;
+        
+        if (data && data.type === 'LOCATION_UPDATED') {
+          setState(prev => ({
+            ...prev,
+            currentLocation: data.location,
+            error: null
+          }));
+        } else if (data && data.type === 'SYNC_COMPLETED') {
+          toast.success(`Background sync completed`, {
+            description: `Successfully sent ${data.count} location updates.`,
+          });
+        }
+      };
+      
+      navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+      
+      return () => {
+        navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+      };
+    }
+  }, []);
 
   // Handle online status changes
   useEffect(() => {
@@ -69,8 +123,52 @@ export function useLocationTracking() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
+      
+      // Stop background tracking if active
+      if (state.backgroundTracking && swRegistration.current && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'STOP_TRACKING'
+        });
+      }
     };
-  }, []);
+  }, [state.backgroundTracking]);
+
+  // Register for background sync
+  const registerBackgroundSync = async () => {
+    if (!isBackgroundSyncSupported || !swRegistration.current) return;
+    
+    try {
+      await swRegistration.current.sync.register('sync-locations');
+      console.log('Background sync registered');
+    } catch (error) {
+      console.error('Background sync registration failed:', error);
+    }
+  };
+
+  // Register for periodic background sync
+  const registerPeriodicSync = async () => {
+    if (!isPeriodicSyncSupported || !swRegistration.current) return;
+    
+    try {
+      const periodicSyncManager = await (swRegistration.current as any).periodicSync;
+      
+      // Check if permission is already granted
+      const status = await periodicSyncManager.getTags();
+      
+      if (!status.includes('geo-update')) {
+        try {
+          await periodicSyncManager.register('geo-update', {
+            minInterval: 15 * 60 * 1000 // 15 minutes
+          });
+          console.log('Periodic background sync registered');
+        } catch (error) {
+          console.error('Periodic background sync registration failed:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Periodic sync error:', error);
+    }
+  };
 
   const startTracking = () => {
     if (!isGeolocationSupported) {
@@ -186,6 +284,17 @@ export function useLocationTracking() {
       countdownIntervalId.current = null;
     }
     
+    // Stop background tracking if active
+    if (state.backgroundTracking && swRegistration.current && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'STOP_TRACKING'
+      });
+      setState(prev => ({ 
+        ...prev, 
+        backgroundTracking: false
+      }));
+    }
+    
     setState(prev => ({ 
       ...prev, 
       isTracking: false
@@ -201,6 +310,49 @@ export function useLocationTracking() {
       stopTracking();
     } else {
       startTracking();
+    }
+  };
+
+  const toggleBackgroundTracking = () => {
+    if (!isServiceWorkerSupported) {
+      toast.error("Background tracking not supported", {
+        description: "Your browser doesn't support service workers required for background tracking."
+      });
+      return;
+    }
+    
+    if (state.backgroundTracking) {
+      // Stop background tracking
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'STOP_TRACKING'
+        });
+      }
+      
+      setState(prev => ({ ...prev, backgroundTracking: false }));
+      toast.info("Background tracking stopped");
+    } else {
+      // Start background tracking
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'START_TRACKING'
+        });
+        
+        // Register for background sync
+        registerBackgroundSync();
+        
+        // Register for periodic background sync
+        registerPeriodicSync();
+        
+        setState(prev => ({ ...prev, backgroundTracking: true }));
+        toast.success("Background tracking started", {
+          description: "Location will be tracked even when the app is in the background."
+        });
+      } else {
+        toast.error("Service worker not ready", {
+          description: "Please try again in a few seconds."
+        });
+      }
     }
   };
 
@@ -402,7 +554,9 @@ export function useLocationTracking() {
     },
     capabilities: {
       isGeolocationSupported,
-      isCameraSupported
+      isCameraSupported,
+      isServiceWorkerSupported,
+      isBackgroundSyncSupported
     },
     actions: {
       toggleTracking,
@@ -411,7 +565,8 @@ export function useLocationTracking() {
       captureImage,
       discardImage,
       toggleDetails,
-      formatCoord
+      formatCoord,
+      toggleBackgroundTracking
     }
   };
 }
